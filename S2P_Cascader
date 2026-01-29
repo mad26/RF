@@ -1,0 +1,116 @@
+import skrf as rf
+import os
+import numpy as np
+import tkinter as tk
+from tkinter import filedialog, messagebox
+
+def select_adapter_file():
+    """Opens a file dialog to select a single adapter file."""
+    filename = filedialog.askopenfilename(
+        title="Select Adapter (Network 2) File",
+        filetypes=[("Touchstone Files", "*.s2p *.snp")],
+        initialdir=os.getcwd()
+    )
+    if filename:
+        adapter_path_var.set(filename)
+
+def select_evb_files():
+    """Opens a file dialog to select multiple EVB de-embed files."""
+    filenames = filedialog.askopenfilenames(
+        title="Select EVB De-embed (Network 1) Files (Ctrl+click to select multiple)",
+        filetypes=[("Touchstone Files", "*.s2p *.snp")],
+        initialdir=os.getcwd()
+    )
+    if filenames:
+        evb_paths_var.set(";".join(filenames))
+
+def process_files():
+    """Loads, processes, cascades networks, and saves the output."""
+    adapter_path = adapter_path_var.get()
+    evb_paths = evb_paths_var.get().split(';')
+    
+    if not adapter_path or not evb_paths:
+        messagebox.showerror("Error", "Please select both adapter and EVB files.")
+        return
+
+    try:
+        # Load the adapter network (network 2)
+        network2 = rf.Network(adapter_path)
+        
+        # Determine the name of the adapter file to use in the output filename
+        adapter_filename_base = os.path.splitext(os.path.basename(adapter_path))[0]
+        output_dir = os.path.dirname(adapter_path)
+
+        # Iterate through all selected EVB files (network 1)
+        for network1_path in evb_paths:
+            if not network1_path: continue
+            network1 = rf.Network(network1_path)
+            
+            # --- Original processing logic starts here ---
+            # Determine the common start and stop frequencies
+            start_frequency = max(network1.frequency.start, network2.frequency.start)
+            stop_frequency = min(network1.frequency.stop, network2.frequency.stop)
+            
+            if start_frequency >= stop_frequency:
+                messagebox.showwarning("Warning", f"No overlapping frequency range between {os.path.basename(network1_path)} and adapter. Skipping.")
+                continue
+                
+            # Finding the step point of each network
+            step_1 = network1.f[1] - network1.f[0] if len(network1.f) > 1 else 0
+            step_2 = network2.f[1] - network2.f[0] if len(network2.f) > 1 else 0
+            #step = min(s for s in [step_1, step_2] if s > 0) # Get minimum non-zero step
+            step = min(step_1, step_2) # Get minimum non-zero step
+            
+            step = (round(step))
+
+            if step <= 0:
+                 messagebox.showwarning("Warning", f"Cannot determine a valid frequency step for {os.path.basename(network1_path)} and adapter. Skipping.")
+                 continue
+            
+            # Arranging the array of frequencies
+            common_freqs = np.around(np.arange(start_frequency, stop_frequency, step), decimals=3) #changed stop_frequency + step/2 to stop_frequency
+
+            # Interpolating both s2p's to same common frequency range
+            network1_interpolate = network1.interpolate(common_freqs)
+            network2_interpolate = network2.interpolate(common_freqs)
+
+            # Cascade the networks
+            cascade_network = rf.cascade(network1_interpolate, network2_interpolate)
+
+            # Save the cascaded network to a new touchstone file with the actual adapter name appended
+            evb_filename_base = os.path.splitext(os.path.basename(network1_path))[0]
+            
+            # Construct the new filename using the actual adapter's name
+            output_path = os.path.join(output_dir, f"{evb_filename_base}_cascaded_with_{adapter_filename_base}.s2p")
+            cascade_network.write_touchstone(output_path)
+            # --- Original processing logic ends here ---
+        
+        messagebox.showinfo("Success", f"Processing complete. Cascaded files saved in {output_dir}.")
+
+    except Exception as e:
+        messagebox.showerror("An error occurred", str(e))
+
+
+# --- Tkinter GUI setup ---
+root = tk.Tk()
+root.title("Network Cascading Tool")
+root.geometry("500x250")
+
+adapter_path_var = tk.StringVar()
+evb_paths_var = tk.StringVar()
+
+# Adapter Selection
+tk.Label(root, text="Select Adapter File:").pack(pady=(10, 0))
+tk.Entry(root, textvariable=adapter_path_var, width=60).pack(padx=10)
+tk.Button(root, text="Browse Adapter", command=select_adapter_file).pack(pady=5)
+
+# EVB Files Selection
+tk.Label(root, text="Select EVB De-embed Files:").pack(pady=(10, 0))
+tk.Entry(root, textvariable=evb_paths_var, width=60).pack(padx=10)
+tk.Button(root, text="Browse EVB Files", command=select_evb_files).pack(pady=5)
+
+# Process Button
+tk.Button(root, text="Process and Cascade Networks", command=process_files, bg="green", fg="white").pack(pady=20)
+
+# Start the Tkinter event loop
+root.mainloop()
