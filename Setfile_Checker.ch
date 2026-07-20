@@ -1,5 +1,4 @@
 // File Created by Guts Explorer: 6/28/2026 5:53:17 PM, 
-//Author: Madhav Khindri, Jawandt; Memory Optimization: Netza Soto
 
 #define ShowStatusMessage // Enables GUTS' internal StatusMessage() macro. Must be defined before including CHInclude.h
 #include "CHInclude.h"
